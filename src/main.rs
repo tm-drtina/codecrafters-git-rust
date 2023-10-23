@@ -1,9 +1,6 @@
-use std::fs::{self, File};
-use std::io::{prelude::*, stdout};
-
-use anyhow::{ensure, Context, Result};
+use anyhow::{ensure, Result};
 use clap::{Parser, Subcommand};
-use flate2::read::ZlibDecoder;
+use git_starter_rust::*;
 
 #[derive(Parser)]
 struct Cli {
@@ -24,10 +21,7 @@ enum Commands {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Commands::Init => {
-            fs::create_dir(".git").context("Create root dir")?;
-            fs::create_dir(".git/objects").context("Create objects dir")?;
-            fs::create_dir(".git/refs").context("Create refs dir")?;
-            fs::write(".git/HEAD", "ref: refs/heads/master\n").context("Write HEAD")?;
+            init()?;
             println!("Initialized git directory")
         }
         Commands::CatFile {
@@ -35,15 +29,8 @@ fn main() -> Result<()> {
             object,
         } => {
             ensure!(pretty_print, "Only pretty-print is supported!");
-            let (prefix, filename) = object.split_at(2);
-            let file = File::open(format!(".git/objects/{}/{}", prefix, filename))
-                .context("Opening object file")?;
-            let mut decoder = ZlibDecoder::new(file);
-            let mut buf = Vec::new();
-            decoder
-                .read_to_end(&mut buf)
-                .context("Reading object file")?;
-            stdout().lock().write_all(&buf).context("Writing result")?;
+            let obj = Object::read(&object)?;
+            obj.print_pretty()?;
         }
     }
     Ok(())
