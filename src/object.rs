@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::io::prelude::*;
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context, Result, ensure, bail};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -48,10 +48,7 @@ impl TryFrom<Vec<u8>> for ObjectHeader {
             .ok_or(anyhow!("Invalid header format"))?;
         let kind = data_type.parse()?;
         let data_length = data_length.parse()?;
-        Ok(Self {
-            kind,
-            data_length,
-        })
+        Ok(Self { kind, data_length })
     }
 }
 impl ObjectHeader {
@@ -68,6 +65,21 @@ pub struct Object {
 }
 
 impl Object {
+    pub fn new(kind: ObjectKind, data: Vec<u8>) -> Self {
+        let header = ObjectHeader {
+            kind,
+            data_length: data.len(),
+        };
+
+        let mut hasher = Sha1::new();
+        hasher.update(header.as_str());
+        hasher.update(&data);
+
+        let hash = hex::encode(hasher.finalize());
+
+        Self { hash, header, data }
+    }
+
     pub fn read(hash: String) -> Result<Self> {
         let (prefix, filename) = hash.split_at(2);
         let file = File::open(format!(".git/objects/{}/{}", prefix, filename))
@@ -97,31 +109,24 @@ impl Object {
         let file = File::create(format!(".git/objects/{}/{}", prefix, filename))
             .context("Creating object file")?;
         let mut encoder = ZlibEncoder::new(file, Compression::default());
-        encoder.write_all(self.header.as_str().as_bytes()).context("Writing header")?;
+        encoder
+            .write_all(self.header.as_str().as_bytes())
+            .context("Writing header")?;
         encoder.write_all(&self.data).context("Writing data")?;
         Ok(())
     }
 
     pub fn create_blob(mut file: File) -> Result<Self> {
         let mut data = Vec::new();
-        let data_length = file.read_to_end(&mut data).context("Reading input file")?;
-
-        let header = ObjectHeader {
-            kind: ObjectKind::Blob,
-            data_length,
-        };
-
-        let mut hasher = Sha1::new();
-        hasher.update(header.as_str());
-        hasher.update(&data);
-
-        let hash = hex::encode(hasher.finalize());
-
-        Ok(Self { hash, header, data })
+        file.read_to_end(&mut data).context("Reading input file")?;
+        Ok(Self::new(ObjectKind::Blob, data))
     }
 
     pub fn print_pretty(&self) -> Result<()> {
-        ensure!(self.header.kind == ObjectKind::Blob, "Pretty print is supported for blobs only!");
+        ensure!(
+            self.header.kind == ObjectKind::Blob,
+            "Pretty print is supported for blobs only!"
+        );
         std::io::stdout()
             .lock()
             .write_all(&self.data)
