@@ -1,6 +1,6 @@
 use std::fs::File;
 
-use anyhow::{ensure, Result, Context};
+use anyhow::{ensure, Context, Result};
 use clap::{Parser, Subcommand};
 use git_starter_rust::*;
 
@@ -23,6 +23,11 @@ enum Commands {
         write: bool,
         file: String,
     },
+    LsTree {
+        #[arg(long)]
+        name_only: bool,
+        tree_sha: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -36,17 +41,28 @@ fn main() -> Result<()> {
             object,
         } => {
             ensure!(pretty_print, "Only pretty-print is supported!");
-            let obj = Object::read(object)?;
+            let obj = object::Object::read(object)?;
             obj.print_pretty()?;
         }
         Commands::HashObject { write, file } => {
             let file = File::open(file).context("Open input file")?;
-            let obj = Object::create(file)?;
+            let obj = object::Object::create_blob(file)?;
             if write {
                 obj.write()?;
             }
             println!("{}", obj.hash);
-        },
+        }
+        Commands::LsTree {
+            name_only,
+            tree_sha,
+        } => {
+            ensure!(name_only, "Only name-only mode is supported!");
+            let obj = object::Object::read(tree_sha)?;
+            let t = tree::Tree::try_from(obj)?;
+            for entry in t.entries {
+                println!("{}", entry.name);
+            }
+        }
     }
     Ok(())
 }
