@@ -1,4 +1,6 @@
-use anyhow::{ensure, Result};
+use std::fs::File;
+
+use anyhow::{ensure, Result, Context};
 use clap::{Parser, Subcommand};
 use git_starter_rust::*;
 
@@ -16,6 +18,11 @@ enum Commands {
         pretty_print: bool,
         object: String,
     },
+    HashObject {
+        #[arg(short)]
+        write: bool,
+        file: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -29,9 +36,17 @@ fn main() -> Result<()> {
             object,
         } => {
             ensure!(pretty_print, "Only pretty-print is supported!");
-            let obj = Object::read(&object)?;
+            let obj = Object::read(object)?;
             obj.print_pretty()?;
         }
+        Commands::HashObject { write, file } => {
+            let file = File::open(file).context("Open input file")?;
+            let obj = Object::create(file)?;
+            if write {
+                obj.write()?;
+            }
+            println!("{}", obj.hash);
+        },
     }
     Ok(())
 }
