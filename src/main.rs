@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::path::PathBuf;
 
 use anyhow::{ensure, Context, Result};
 use clap::{Parser, Subcommand};
@@ -21,13 +22,14 @@ enum Commands {
     HashObject {
         #[arg(short)]
         write: bool,
-        file: String,
+        file: PathBuf,
     },
     LsTree {
         #[arg(long)]
         name_only: bool,
         tree_sha: String,
     },
+    WriteTree,
 }
 
 fn main() -> Result<()> {
@@ -62,6 +64,11 @@ fn main() -> Result<()> {
             for entry in t.entries {
                 println!("{}", entry.name);
             }
+        }
+        Commands::WriteTree => {
+            let obj = tree::Tree::create(&std::env::current_dir()?)?.into_object();
+            obj.write()?;
+            println!("{}", obj.hash);
         }
     }
     Ok(())

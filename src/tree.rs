@@ -1,15 +1,18 @@
-use anyhow::{anyhow, ensure, Context, Result};
+use std::fs::{self, File};
+use std::os::unix::prelude::OsStrExt;
+use std::path::Path;
+
+use anyhow::{anyhow, bail, ensure, Context, Result};
 
 use crate::object::{Object, ObjectKind};
 
 pub struct TreeEntry {
     pub mode: String,
     pub name: String,
-    pub reference: [u8; 20],
+    pub reference: Vec<u8>,
 }
 
 pub struct Tree {
-    pub content_size: usize,
     pub entries: Vec<TreeEntry>,
 }
 
@@ -34,7 +37,7 @@ impl TryFrom<Object> for Tree {
                 .context("Parsing entry header")?
                 .split_once(" ")
                 .ok_or(anyhow!("Invalid entry header"))?;
-            let reference = data[split + 1..split + 21].try_into()?;
+            let reference = data[split + 1..split + 21].to_vec();
             data = &data[split + 21..];
             entries.push(TreeEntry {
                 mode: mode.to_string(),
@@ -43,9 +46,79 @@ impl TryFrom<Object> for Tree {
             });
         }
 
-        Ok(Self {
-            content_size: object.header.data_length,
-            entries,
+        Ok(Self { entries })
+    }
+}
+
+impl Tree {
+    pub fn into_object(self) -> Object {
+        let mut data = Vec::new();
+        for entry in self.entries {
+            data.extend(entry.mode.as_bytes());
+            data.push(b' ');
+            data.extend(entry.name.as_bytes());
+            data.push(b'\0');
+            data.extend(entry.reference);
+        }
+        Object::new(ObjectKind::Tree, data)
+    }
+
+    fn filemode(d: &fs::DirEntry) -> Result<String> {
+        Ok(if cfg!(unix) {
+            if 0o100 & std::os::unix::fs::PermissionsExt::mode(&d.metadata()?.permissions()) > 0 {
+                String::from("100755")
+            } else {
+                String::from("100644")
+            }
+        } else {
+            String::from("100644")
         })
+    }
+
+    pub fn create(dir: &Path) -> Result<Self> {
+        ensure!(dir.is_dir(), "Path must be directory");
+        let mut entries = Vec::new();
+        for item in fs::read_dir(dir)? {
+            let item = item?;
+            let file_type = item.file_type()?;
+            let name = item
+                .file_name()
+                .into_string()
+                .map_err(|s| anyhow!("Cannot convert filename into str: {:?}", s))?;
+            if file_type.is_dir() {
+                if name == ".git" {
+                    continue;
+                }
+                let object = Self::create(&item.path())?.into_object();
+                object.write()?;
+                entries.push(TreeEntry {
+                    mode: String::from("40000"),
+                    name,
+                    reference: hex::decode(object.hash)?,
+                })
+            } else if file_type.is_file() {
+                let object = Object::create_blob(File::open(item.path())?)?;
+                object.write()?;
+
+                entries.push(TreeEntry {
+                    mode: Self::filemode(&item)?,
+                    name,
+                    reference: hex::decode(object.hash)?,
+                })
+            } else if file_type.is_symlink() {
+                let reference = item.path().read_link()?.as_os_str().as_bytes().to_vec();
+                entries.push(TreeEntry {
+                    mode: String::from("120000"),
+                    name,
+                    reference,
+                });
+            } else {
+                bail!("Unsupported file type {:?}", file_type);
+            }
+        }
+
+        entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+
+        Ok(Self { entries })
     }
 }
