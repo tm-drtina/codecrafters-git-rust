@@ -66,8 +66,7 @@ fn main() -> Result<()> {
             }
         }
         Commands::WriteTree => {
-            let obj = tree::Tree::create(&std::env::current_dir()?)?.into_object();
-            obj.write()?;
+            let obj = tree::Tree::write(&std::env::current_dir()?)?;
             println!("{}", obj.hash);
         }
     }

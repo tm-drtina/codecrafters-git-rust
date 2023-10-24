@@ -1,5 +1,4 @@
 use std::fs::{self, File};
-use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
@@ -89,8 +88,7 @@ impl Tree {
                 if name == ".git" {
                     continue;
                 }
-                let object = Self::create(&item.path())?.into_object();
-                object.write()?;
+                let object = Self::write(&item.path())?;
                 entries.push(TreeEntry {
                     mode: String::from("40000"),
                     name,
@@ -106,7 +104,14 @@ impl Tree {
                     reference: hex::decode(object.hash)?,
                 })
             } else if file_type.is_symlink() {
-                let reference = item.path().read_link()?.as_os_str().as_bytes().to_vec();
+                let reference = item
+                    .path()
+                    .read_link()?
+                    .as_os_str()
+                    .to_str()
+                    .ok_or(anyhow!("Failed to read link as str"))?
+                    .as_bytes()
+                    .to_vec();
                 entries.push(TreeEntry {
                     mode: String::from("120000"),
                     name,
@@ -120,5 +125,11 @@ impl Tree {
         entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
         Ok(Self { entries })
+    }
+
+    pub fn write(dir: &Path) -> Result<Object> {
+        let obj = Self::create(dir)?.into_object();
+        obj.write()?;
+        Ok(obj)
     }
 }
