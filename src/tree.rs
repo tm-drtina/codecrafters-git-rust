@@ -50,16 +50,20 @@ impl TryFrom<Object> for Tree {
 }
 
 impl Tree {
-    pub fn into_object(self) -> Object {
+    pub fn to_bytes(&self) -> Vec<u8> {
         let mut data = Vec::new();
-        for entry in self.entries {
+        for entry in &self.entries {
             data.extend(entry.mode.as_bytes());
             data.push(b' ');
             data.extend(entry.name.as_bytes());
             data.push(b'\0');
-            data.extend(entry.reference);
+            data.extend(&entry.reference);
         }
-        Object::new(ObjectKind::Tree, data)
+        data
+    }
+
+    pub fn into_object(&self) -> Object {
+        Object::new(ObjectKind::Tree, self.to_bytes())
     }
 
     fn filemode(d: &fs::DirEntry) -> Result<String> {
@@ -95,7 +99,7 @@ impl Tree {
                     reference: hex::decode(object.hash)?,
                 })
             } else if file_type.is_file() {
-                let object = Object::create_blob(File::open(item.path())?)?;
+                let object: Object = File::open(item.path())?.try_into()?;
                 object.write()?;
 
                 entries.push(TreeEntry {

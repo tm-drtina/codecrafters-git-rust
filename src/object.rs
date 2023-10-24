@@ -8,15 +8,20 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use sha1::{Digest, Sha1};
 
+use crate::commit::Commit;
+use crate::tree::Tree;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectKind {
     Blob,
+    Commit,
     Tree,
 }
 impl ObjectKind {
     fn as_str(&self) -> &'static str {
         match self {
             ObjectKind::Blob => "blob",
+            ObjectKind::Commit => "commit",
             ObjectKind::Tree => "tree",
         }
     }
@@ -27,6 +32,7 @@ impl FromStr for ObjectKind {
     fn from_str(value: &str) -> Result<Self> {
         Ok(match value {
             "blob" => Self::Blob,
+            "commit" => Self::Commit,
             "tree" => Self::Tree,
             _ => bail!("Unrecognized object kind {:?}", value),
         })
@@ -62,6 +68,26 @@ pub struct Object {
     pub hash: String,
     pub header: ObjectHeader,
     pub data: Vec<u8>,
+}
+
+impl From<Tree> for Object {
+    fn from(tree: Tree) -> Self {
+        Self::new(ObjectKind::Tree, tree.to_bytes())
+    }
+}
+impl From<Commit> for Object {
+    fn from(commit: Commit) -> Self {
+        Self::new(ObjectKind::Commit, commit.to_bytes())
+    }
+}
+impl TryFrom<File> for Object {
+    type Error = anyhow::Error;
+
+    fn try_from(mut file: File) -> Result<Self> {
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).context("Reading input file")?;
+        Ok(Self::new(ObjectKind::Blob, data))
+    }
 }
 
 impl Object {
@@ -114,12 +140,6 @@ impl Object {
             .context("Writing header")?;
         encoder.write_all(&self.data).context("Writing data")?;
         Ok(())
-    }
-
-    pub fn create_blob(mut file: File) -> Result<Self> {
-        let mut data = Vec::new();
-        file.read_to_end(&mut data).context("Reading input file")?;
-        Ok(Self::new(ObjectKind::Blob, data))
     }
 
     pub fn print_pretty(&self) -> Result<()> {

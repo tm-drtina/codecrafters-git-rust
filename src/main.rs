@@ -30,6 +30,13 @@ enum Commands {
         tree_sha: String,
     },
     WriteTree,
+    CommitTree {
+        tree_sha: String,
+        #[arg(short)]
+        parent: Option<String>,
+        #[arg(short)]
+        message: String,
+    }
 }
 
 fn main() -> Result<()> {
@@ -47,8 +54,7 @@ fn main() -> Result<()> {
             obj.print_pretty()?;
         }
         Commands::HashObject { write, file } => {
-            let file = File::open(file).context("Open input file")?;
-            let obj = object::Object::create_blob(file)?;
+            let obj: object::Object = File::open(file).context("Open input file")?.try_into()?;
             if write {
                 obj.write()?;
             }
@@ -69,6 +75,24 @@ fn main() -> Result<()> {
             let obj = tree::Tree::write(&std::env::current_dir()?)?;
             println!("{}", obj.hash);
         }
+        Commands::CommitTree { tree_sha, parent, message } => {
+            let author = commit::Author {
+                name: String::from("Bob"),
+                email: String::from("bob@example.com"),
+                time: std::time::SystemTime::now(),
+                time_offset: String::from("+0200"),
+            };
+            let c = commit::Commit {
+                tree_sha,
+                parent,
+                author: author.clone(),
+                commiter: author,
+                message,
+            };
+            let obj: object::Object = c.try_into()?;
+            obj.write()?;
+            println!("{}", obj.hash);
+        },
     }
     Ok(())
 }
