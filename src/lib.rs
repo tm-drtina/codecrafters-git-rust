@@ -2,6 +2,7 @@ use std::fs;
 
 use anyhow::{Context, Result};
 
+pub mod commit;
 pub mod object;
 pub mod tree;
 
