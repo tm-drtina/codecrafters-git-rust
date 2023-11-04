@@ -36,13 +36,17 @@ enum Commands {
         parent: Option<String>,
         #[arg(short)]
         message: String,
+    },
+    Clone {
+        repo: String,
+        dest: PathBuf,
     }
 }
 
 fn main() -> Result<()> {
     match Cli::parse().command {
         Commands::Init => {
-            init()?;
+            init(&std::env::current_dir()?)?;
             println!("Initialized git directory")
         }
         Commands::CatFile {
@@ -92,6 +96,12 @@ fn main() -> Result<()> {
             let obj: object::Object = c.try_into()?;
             obj.write()?;
             println!("{}", obj.hash);
+        },
+        Commands::Clone { repo, dest } => {
+            init(&dest)?;
+            let http_client = http_protocol::GitHttpClient::new(repo);
+            let ref_info = http_client.ref_info()?;
+            todo!()
         },
     }
     Ok(())
