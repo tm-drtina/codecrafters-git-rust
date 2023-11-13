@@ -8,6 +8,7 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use sha1::{Digest, Sha1};
 
+use crate::GitRepo;
 use crate::commit::Commit;
 use crate::tree::Tree;
 
@@ -106,9 +107,9 @@ impl Object {
         Self { hash, header, data }
     }
 
-    pub fn read(hash: String) -> Result<Self> {
+    pub fn read(repo: &GitRepo, hash: String) -> Result<Self> {
         let (prefix, filename) = hash.split_at(2);
-        let file = File::open(format!(".git/objects/{}/{}", prefix, filename))
+        let file = File::open(repo.objects_dir.join(prefix).join(filename))
             .context("Opening object file")?;
         let mut decoder = ZlibDecoder::new(file);
         let mut buf = Vec::new();
@@ -129,10 +130,10 @@ impl Object {
         Ok(Self { hash, header, data })
     }
 
-    pub fn write(&self) -> Result<()> {
+    pub fn write(&self, repo: &GitRepo) -> Result<()> {
         let (prefix, filename) = self.hash.split_at(2);
-        fs::create_dir_all(format!(".git/objects/{}", prefix)).context("Creating object dirs")?;
-        let file = File::create(format!(".git/objects/{}/{}", prefix, filename))
+        fs::create_dir_all(repo.objects_dir.join(prefix)).context("Creating object dirs")?;
+        let file = File::create(repo.objects_dir.join(prefix).join(filename))
             .context("Creating object file")?;
         let mut encoder = ZlibEncoder::new(file, Compression::default());
         encoder
