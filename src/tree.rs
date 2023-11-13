@@ -1,9 +1,11 @@
 use std::fs::{self, File};
+use std::io::Write;
 use std::path::Path;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
 
 use crate::object::{Object, ObjectKind};
+use crate::GitRepo;
 
 pub struct TreeEntry {
     pub mode: String,
@@ -78,10 +80,68 @@ impl Tree {
         })
     }
 
-    pub fn create(dir: &Path) -> Result<Self> {
-        ensure!(dir.is_dir(), "Path must be directory");
+    fn set_permissions(file: &File, executable: bool) -> Result<()> {
+        if cfg!(unix) {
+            let metadata = file.metadata()?;
+            let mut permissions = metadata.permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(
+                &mut permissions,
+                if executable { 0o755 } else { 0o644 },
+            );
+        } else {
+            // We ignore permissions on non-unix systems
+        }
+        Ok(())
+    }
+
+    fn create_symlink(original: &Path, link: &Path) -> Result<()> {
+        if cfg!(unix) {
+            std::os::unix::fs::symlink(original, link)?;
+        } else {
+            bail!("Symlink on non-unix platforms are not supported");
+        }
+        Ok(())
+    }
+
+    pub fn checkout(&self, repo: &GitRepo, path: &Path) -> Result<()> {
+        for entry in &self.entries {
+            let subpath = path.join(&entry.name);
+            match entry.mode.as_str() {
+                "40000" => {
+                    // dir
+                    fs::create_dir(&subpath)?;
+                    let subtree: Tree =
+                        Object::read(repo, String::from_utf8(entry.reference.clone())?)?
+                            .try_into()?;
+                    subtree.checkout(repo, &subpath)?;
+                }
+                "120000" => {
+                    // symlink
+                    Self::create_symlink(
+                        Path::new(std::str::from_utf8(&entry.reference)?),
+                        &subpath,
+                    )?;
+                }
+                "100644" | "100755" => {
+                    // file
+                    let mut file = File::create(subpath)?;
+                    Self::set_permissions(&file, entry.mode == "100755")?;
+                    let mut obj = Object::read(repo, String::from_utf8(entry.reference.clone())?)?;
+                    file.write_all(&mut obj.data)?;
+                    file.flush()?;
+                }
+                _ => {
+                    bail!("Unrecognized filemode {}", entry.mode)
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn create(repo: &GitRepo, root: &Path) -> Result<Self> {
+        ensure!(root.is_dir(), "Path must be directory");
         let mut entries = Vec::new();
-        for item in fs::read_dir(dir)? {
+        for item in fs::read_dir(root)? {
             let item = item?;
             let file_type = item.file_type()?;
             let name = item
@@ -92,7 +152,7 @@ impl Tree {
                 if name == ".git" {
                     continue;
                 }
-                let object = Self::write(&item.path())?;
+                let object = Self::write(repo, &item.path())?;
                 entries.push(TreeEntry {
                     mode: String::from("40000"),
                     name,
@@ -100,7 +160,7 @@ impl Tree {
                 })
             } else if file_type.is_file() {
                 let object: Object = File::open(item.path())?.try_into()?;
-                object.write()?;
+                object.write(repo)?;
 
                 entries.push(TreeEntry {
                     mode: Self::filemode(&item)?,
@@ -131,9 +191,9 @@ impl Tree {
         Ok(Self { entries })
     }
 
-    pub fn write(dir: &Path) -> Result<Object> {
-        let obj = Self::create(dir)?.into_object();
-        obj.write()?;
+    pub fn write(repo: &GitRepo, path: &Path) -> Result<Object> {
+        let obj = Self::create(repo, path)?.into_object();
+        obj.write(repo)?;
         Ok(obj)
     }
 }
