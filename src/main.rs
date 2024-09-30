@@ -1,9 +1,13 @@
 use std::fs::File;
 use std::path::PathBuf;
 
-use anyhow::{ensure, Context, Result, bail};
+use anyhow::{bail, ensure, Context, Result};
 use clap::{Parser, Subcommand};
-use git_starter_rust::*;
+use codecrafters_git::commit::{Author, Commit};
+use codecrafters_git::http_protocol::GitHttpClient;
+use codecrafters_git::object::Object;
+use codecrafters_git::tree::Tree;
+use codecrafters_git::GitRepo;
 
 #[derive(Parser)]
 struct Cli {
@@ -40,7 +44,7 @@ enum Commands {
     Clone {
         repo_url: String,
         dest: PathBuf,
-    }
+    },
 }
 
 fn main() -> Result<()> {
@@ -55,12 +59,12 @@ fn main() -> Result<()> {
         } => {
             ensure!(pretty_print, "Only pretty-print is supported!");
             let repo = GitRepo::new_in_cwd()?;
-            let obj = object::Object::read(&repo, object)?;
+            let obj = Object::read(&repo, object)?;
             obj.print_pretty()?;
         }
         Commands::HashObject { write, file } => {
             let repo = GitRepo::new_in_cwd()?;
-            let obj: object::Object = File::open(file).context("Open input file")?.try_into()?;
+            let obj: Object = File::open(file).context("Open input file")?.try_into()?;
             if write {
                 obj.write(&repo)?;
             }
@@ -72,41 +76,45 @@ fn main() -> Result<()> {
         } => {
             ensure!(name_only, "Only name-only mode is supported!");
             let repo = GitRepo::new_in_cwd()?;
-            let obj = object::Object::read(&repo, tree_sha)?;
-            let t = tree::Tree::try_from(obj)?;
+            let obj = Object::read(&repo, tree_sha)?;
+            let t = Tree::try_from(obj)?;
             for entry in t.entries {
                 println!("{}", entry.name);
             }
         }
         Commands::WriteTree => {
             let repo = GitRepo::new_in_cwd()?;
-            let obj = tree::Tree::write(&repo, &repo.repo_root)?;
+            let obj = Tree::write(&repo, &repo.repo_root)?;
             println!("{}", obj.hash);
         }
-        Commands::CommitTree { tree_sha, parent, message } => {
+        Commands::CommitTree {
+            tree_sha,
+            parent,
+            message,
+        } => {
             let repo = GitRepo::new_in_cwd()?;
-            let author = commit::Author {
+            let author = Author {
                 name: String::from("Bob"),
                 email: String::from("bob@example.com"),
                 time: std::time::SystemTime::now(),
                 time_offset: String::from("+0200"),
             };
-            let c = commit::Commit {
+            let c = Commit {
                 tree_sha,
                 parent,
                 author: author.clone(),
                 commiter: author,
                 message,
             };
-            let obj: object::Object = c.try_into()?;
+            let obj: Object = c.try_into()?;
             obj.write(&repo)?;
             println!("{}", obj.hash);
-        },
+        }
         Commands::Clone { repo_url, dest } => {
             std::fs::create_dir_all(&dest)?;
             let repo = GitRepo::new(&dest);
             repo.init()?;
-            let http_client = http_protocol::GitHttpClient::new(&repo, repo_url);
+            let http_client = GitHttpClient::new(&repo, repo_url);
             let ref_info = http_client.ref_info()?;
             http_client.fetch_refs(ref_info.refs.iter().map(|r| &r.id).collect())?;
 
@@ -117,7 +125,7 @@ fn main() -> Result<()> {
             } else {
                 bail!("Missing HEAD reference");
             }
-        },
+        }
     }
     Ok(())
 }
