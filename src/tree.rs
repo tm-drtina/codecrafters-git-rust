@@ -106,16 +106,12 @@ impl Tree {
                     // dir
                     fs::create_dir(&subpath)?;
                     let subtree: Tree =
-                        Object::read(repo, hex::encode(&entry.reference))?
-                            .try_into()?;
+                        Object::read(repo, hex::encode(&entry.reference))?.try_into()?;
                     subtree.checkout(repo, &subpath)?;
                 }
                 "120000" => {
                     // symlink
-                    Self::create_symlink(
-                        Path::new(&hex::encode(&entry.reference)),
-                        &subpath,
-                    )?;
+                    Self::create_symlink(Path::new(&hex::encode(&entry.reference)), &subpath)?;
                 }
                 "100644" | "100755" => {
                     // file
