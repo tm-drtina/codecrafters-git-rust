@@ -1,5 +1,6 @@
 use std::fs::{self, File};
 use std::io::prelude::*;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
@@ -8,9 +9,9 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use sha1::{Digest, Sha1};
 
-use crate::GitRepo;
 use crate::commit::Commit;
 use crate::tree::Tree;
+use crate::GitRepo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectKind {
@@ -107,10 +108,16 @@ impl Object {
         Self { hash, header, data }
     }
 
-    pub fn read(repo: &GitRepo, hash: String) -> Result<Self> {
+    pub(crate) fn path(repo: &GitRepo, hash: &str) -> (PathBuf, PathBuf) {
         let (prefix, filename) = hash.split_at(2);
-        let file = File::open(repo.objects_dir.join(prefix).join(filename))
-            .context("Opening object file")?;
+        let dir_path = repo.objects_dir.join(prefix);
+        let file_path = dir_path.join(filename);
+        (dir_path, file_path)
+    }
+
+    pub fn read(repo: &GitRepo, hash: String) -> Result<Self> {
+        let (_, path) = Self::path(repo, &hash);
+        let file = File::open(path).context("Opening object file")?;
         let mut decoder = ZlibDecoder::new(file);
         let mut buf = Vec::new();
         decoder
@@ -131,10 +138,9 @@ impl Object {
     }
 
     pub fn write(&self, repo: &GitRepo) -> Result<()> {
-        let (prefix, filename) = self.hash.split_at(2);
-        fs::create_dir_all(repo.objects_dir.join(prefix)).context("Creating object dirs")?;
-        let file = File::create(repo.objects_dir.join(prefix).join(filename))
-            .context("Creating object file")?;
+        let (dir_path, file_path) = Self::path(repo, &self.hash);
+        fs::create_dir_all(dir_path).context("Creating object dirs")?;
+        let file = File::create(file_path).context("Creating object file")?;
         let mut encoder = ZlibEncoder::new(file, Compression::default());
         encoder
             .write_all(self.header.as_str().as_bytes())
