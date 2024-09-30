@@ -32,9 +32,23 @@ impl<'a> GitHttpClient<'a> {
             .context("Cannot convert Content-Type header value to str")?;
         ensure!(
             actual_content_type == content_type,
-            "Unexpected Content-Type header value. Got {}", actual_content_type
+            "Unexpected Content-Type header value. Got {}",
+            actual_content_type
         );
         Ok(())
+    }
+
+    fn load_varint(data: &mut &[u8]) -> u32 {
+        let mut cont = true;
+        let mut val = 0u32;
+        let mut shift = 0;
+        while cont {
+            cont = data[0] >= 128;
+            val += ((data[0] & 0b0111_1111) as u32) << shift;
+            shift += 7;
+            *data = &data[1..];
+        }
+        val
     }
 
     fn parse_pkt_lines(&self, mut lines: &[u8]) -> Result<VecDeque<PktLine>> {
@@ -49,17 +63,15 @@ impl<'a> GitHttpClient<'a> {
                 let (packets_num, mut rest) = rest.split_at(4);
                 let packets_num = u32::from_be_bytes(packets_num.try_into()?);
                 for _i in 0..packets_num {
-                    let mut cont = rest[0] >= 128;
-                    let pack_entry_type = PackEntryType::try_from((rest[0] >> 4) & 7)?;
-                    let mut val = (rest[0] & 15) as u32;
-                    let mut shift = 4;
-                    rest = &rest[1..];
-                    while cont {
-                        cont = rest[0] >= 128;
-                        val += ((rest[0] & 127) as u32) << shift;
-                        shift += 7;
+                    let pack_entry_type = PackEntryType::try_from((rest[0] >> 4) & 0b0111)?;
+                    let mut val = (rest[0] & 0b1111) as u32;
+                    if rest[0] & 0b1000_0000 != 0 {
+                        rest = &rest[1..];
+                        val += Self::load_varint(&mut rest) << 4;
+                    } else {
                         rest = &rest[1..];
                     }
+
                     match pack_entry_type {
                         PackEntryType::OBJ_COMMIT
                         | PackEntryType::OBJ_TREE
@@ -95,16 +107,61 @@ impl<'a> GitHttpClient<'a> {
                         PackEntryType::OBJ_REF_DELTA => {
                             let ref_delta = hex::encode(&rest[..20]);
                             rest = &rest[20..];
+                            eprintln!("REF_DELTA: {ref_delta}");
 
                             let mut decoder = ZlibDecoder::new(rest);
                             let mut buf = Vec::new();
                             decoder.read_to_end(&mut buf).context("Reading pack diff")?;
                             let read_bytes = decoder.total_in() as usize;
-
-                            eprintln!("REF_DELTA: {}: {:?}", ref_delta, &buf);
-                            // TODO: resolve the delta file!
-
                             rest = &rest[read_bytes..];
+
+                            let mut delta_data = &*buf;
+
+                            let _source_len = Self::load_varint(&mut delta_data);
+                            let target_len = Self::load_varint(&mut delta_data);
+
+                            let source = Object::read(&self.repo, ref_delta)?;
+                            let mut output = Vec::<u8>::with_capacity(target_len as usize);
+
+                            while delta_data.len() > 0 {
+                                let op = delta_data[0];
+                                delta_data = &delta_data[1..];
+
+                                if op & 0b1000_0000 != 0 {
+                                    // COPY
+                                    let mut offset: u32 = 0;
+                                    for i in 0..4 {
+                                        if op & (0b0000_0001 << i) != 0 {
+                                            offset += (delta_data[0] as u32) << (i * 8);
+                                            delta_data = &delta_data[1..];
+                                        }
+                                    }
+                                    let mut len: u32 = 0;
+                                    for i in 0..3 {
+                                        if op & (0b0001_0000 << i) != 0 {
+                                            len += (delta_data[0] as u32) << (i * 8);
+                                            delta_data = &delta_data[1..];
+                                        }
+                                    }
+
+                                    eprintln!("Copy from: {offset} bytes: {len}");
+
+                                    output.extend_from_slice(
+                                        &source.data[offset as usize..(offset + len) as usize],
+                                    );
+                                } else {
+                                    // INSERT
+                                    let len = (op & 0b0111_1111) as usize;
+                                    let insert_data = &delta_data[..len];
+                                    delta_data = &delta_data[len..];
+
+                                    eprintln!("Insert {len} bytes: {insert_data:?}");
+                                    output.extend_from_slice(insert_data);
+                                }
+                            }
+
+                            debug_assert_eq!(output.len(), target_len as usize);
+                            Object::new(source.header.kind, output).write(&self.repo)?;
                         }
                     }
                 }

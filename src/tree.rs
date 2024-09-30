@@ -111,14 +111,14 @@ impl Tree {
                     // dir
                     fs::create_dir(&subpath)?;
                     let subtree: Tree =
-                        Object::read(repo, String::from_utf8(entry.reference.clone())?)?
+                        Object::read(repo, hex::encode(&entry.reference))?
                             .try_into()?;
                     subtree.checkout(repo, &subpath)?;
                 }
                 "120000" => {
                     // symlink
                     Self::create_symlink(
-                        Path::new(std::str::from_utf8(&entry.reference)?),
+                        Path::new(&hex::encode(&entry.reference)),
                         &subpath,
                     )?;
                 }
@@ -126,7 +126,7 @@ impl Tree {
                     // file
                     let mut file = File::create(subpath)?;
                     Self::set_permissions(&file, entry.mode == "100755")?;
-                    let mut obj = Object::read(repo, String::from_utf8(entry.reference.clone())?)?;
+                    let mut obj = Object::read(repo, hex::encode(&entry.reference))?;
                     file.write_all(&mut obj.data)?;
                     file.flush()?;
                 }
