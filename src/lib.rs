@@ -42,13 +42,13 @@ impl GitRepo {
     // TODO: move to commit
     pub fn checkout(&self, commit_hash: String) -> Result<()> {
         eprintln!("Checkout commit at {}", commit_hash);
-        let commit_obj = object::Object::read(&self, commit_hash)?;
+        let commit_obj = object::Object::read(self, commit_hash)?;
         ensure!(commit_obj.header.kind == object::ObjectKind::Commit, "Given hash does not represent commit");
         let tree_hash = commit_obj.data.split(|c| *c == b'\n').find_map(|line| line.strip_prefix(b"tree ")).ok_or(anyhow!("Commit doesn't contain tree reference"))?;
         let tree_hash = String::from_utf8(tree_hash.to_vec())?;
         eprintln!("Checkout tree at {}", tree_hash);
-        let tree: Tree = object::Object::read(&self, tree_hash)?.try_into()?;
-        tree.checkout(&self, &self.repo_root)?;
+        let tree: Tree = object::Object::read(self, tree_hash)?.try_into()?;
+        tree.checkout(self, &self.repo_root)?;
         Ok(())
     }
 }

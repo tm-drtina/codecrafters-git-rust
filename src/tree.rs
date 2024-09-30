@@ -28,12 +28,7 @@ impl TryFrom<Object> for Tree {
         let mut entries = Vec::new();
 
         let mut data = &*object.data;
-        loop {
-            let split = if let Some(pos) = data.iter().position(|c| *c == b'\0') {
-                pos
-            } else {
-                break;
-            };
+        while let Some(split) = data.iter().position(|c| *c == b'\0') {
             let (mode, name) = std::str::from_utf8(&data[..split])
                 .context("Parsing entry header")?
                 .split_once(" ")
@@ -126,8 +121,8 @@ impl Tree {
                     // file
                     let mut file = File::create(subpath)?;
                     Self::set_permissions(&file, entry.mode == "100755")?;
-                    let mut obj = Object::read(repo, hex::encode(&entry.reference))?;
-                    file.write_all(&mut obj.data)?;
+                    let obj = Object::read(repo, hex::encode(&entry.reference))?;
+                    file.write_all(&obj.data)?;
                     file.flush()?;
                 }
                 _ => {

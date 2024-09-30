@@ -106,7 +106,7 @@ fn main() -> Result<()> {
                 commiter: author,
                 message,
             };
-            let obj: Object = c.try_into()?;
+            let obj: Object = c.into();
             obj.write(&repo)?;
             println!("{}", obj.hash);
         }

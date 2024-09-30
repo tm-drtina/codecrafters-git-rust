@@ -55,11 +55,11 @@ impl<'a> GitHttpClient<'a> {
         let mut pkt_lines = VecDeque::new();
 
         let mut data_len_bytes = [0u8; 2];
-        while lines.len() > 0 {
+        while !lines.is_empty() {
             let (prefix, rest) = lines.split_at(4);
             if prefix == b"PACK" {
                 let (version, rest) = rest.split_at(4);
-                ensure!(version == &[0, 0, 0, 2], "Packfile version should be 2");
+                ensure!(version == [0, 0, 0, 2], "Packfile version should be 2");
                 let (packets_num, mut rest) = rest.split_at(4);
                 let packets_num = u32::from_be_bytes(packets_num.try_into()?);
                 for _i in 0..packets_num {
@@ -120,10 +120,10 @@ impl<'a> GitHttpClient<'a> {
                             let _source_len = Self::load_varint(&mut delta_data);
                             let target_len = Self::load_varint(&mut delta_data);
 
-                            let source = Object::read(&self.repo, ref_delta)?;
+                            let source = Object::read(self.repo, ref_delta)?;
                             let mut output = Vec::<u8>::with_capacity(target_len as usize);
 
-                            while delta_data.len() > 0 {
+                            while !delta_data.is_empty() {
                                 let op = delta_data[0];
                                 delta_data = &delta_data[1..];
 
@@ -161,7 +161,7 @@ impl<'a> GitHttpClient<'a> {
                             }
 
                             debug_assert_eq!(output.len(), target_len as usize);
-                            Object::new(source.header.kind, output).write(&self.repo)?;
+                            Object::new(source.header.kind, output).write(self.repo)?;
                         }
                     }
                 }
